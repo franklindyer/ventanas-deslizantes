@@ -1,6 +1,6 @@
 # ventanas-deslizantes
 
-[Fig1](/img/ventanas-deslizantes.png)
+![Fig1](/img/ventanas-deslizantes.png)
 
 Una simulación en C del algoritmo de ventanas deslizantes que se usa en el protocolo TCP. Se describe el algoritmo con 4 parámetros:
 
