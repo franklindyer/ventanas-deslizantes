@@ -3,6 +3,7 @@
 #include "lista_eventos.c"
 
 #define VERBOSE 1
+#define RESUMEN 1
 
 #define TERM_TRANS 1
 #define LLEGADA_DATOS 2
@@ -26,7 +27,6 @@ struct Ventana* nueva_ventana() {
 
 void actualizar_shift(struct Ventana* ventana) {
     if ((ventana->buffer) & 1) {
-        ventana->buffer = (ventana->buffer) >> 1;
         ventana->buffer = (ventana->buffer) >> 1;
         ventana->shift += 1;
         actualizar_shift(ventana);
@@ -55,11 +55,20 @@ int empezar_transmision(struct Evento* princ, struct Ventana* emisor, float tran
 void simular_ventanas_deslizantes(int largo, int total, float transmis, float timeout) {
     /* Inicializar la lista de eventos */
     struct Evento* princ = evento_nulo();
+    struct Evento* princ_abs;
     float hora_actual = 0;
     float espera = 0;
     int evento_actual = 0;
     float propag_sig = 0;
     int num_trans = 0;
+
+    /* Estadisticas */
+    float emisor_ocioso = 0;
+    int segmentos_total = 0;
+    int acks_total = 0;
+    int segmentos_perdidos = 0;
+    int acks_perdidos = 0;
+    int num_timeouts = 0;
 
     /* Inicializar los agentes */
     struct Ventana* emisor = nueva_ventana();
@@ -67,6 +76,7 @@ void simular_ventanas_deslizantes(int largo, int total, float transmis, float ti
     struct Ventana* receptor = nueva_ventana();
 
     princ = insertar_evento(princ, TERM_TRANS, transmis, emisor->shift);
+    princ_abs = princ;
     emisor->buffer = 1;
     transmitiendo = 1;    
     if (VERBOSE) printf("0 : Transimision del primer segmento.\n");
@@ -74,13 +84,20 @@ void simular_ventanas_deslizantes(int largo, int total, float transmis, float ti
     while (emisor->shift < total) {
         espera = adelante(princ);
         hora_actual += espera;
+        if (transmitiendo == 0) emisor_ocioso += espera;
         num_trans = princ->datos;    
 
         evento_actual = princ->tipo;
 
+        if (emisor->buffer > 256) {
+            printf("BIG BUFFER\n");
+            exit(1);
+        }
+
         if (evento_actual == TERM_TRANS) {
             if (VERBOSE) printf("%.4f : fin de transmision de segmento %d.\n", hora_actual, num_trans);
             transmitiendo = 0;
+            segmentos_total += 1;
 
             /* Insertar evento para la llegada del segmento */
             scanf("%f", &propag_sig);
@@ -88,13 +105,16 @@ void simular_ventanas_deslizantes(int largo, int total, float transmis, float ti
                 insertar_evento(princ, LLEGADA_DATOS, propag_sig, num_trans);
             } else {
                 if (VERBOSE) printf("El segmento %d se pierde en camino.\n", num_trans);
+                segmentos_perdidos += 1;
             }
 
             /* Insertar evento para el timeout */
             insertar_evento(princ, TIMEOUT, timeout, num_trans);
 
             /* Actualizar la lista de emitidos */
-            emisor->buffer = (emisor->buffer) | (1 << (num_trans - emisor->shift));
+            if (num_trans >= emisor->shift) {
+                emisor->buffer = (emisor->buffer) | (1 << (num_trans - emisor->shift));
+            }
 
             /* Empezar nueva transmision si es apropiado */
             transmitiendo = empezar_transmision(princ, emisor, transmis, largo, total);
@@ -107,7 +127,9 @@ void simular_ventanas_deslizantes(int largo, int total, float transmis, float ti
             if (VERBOSE) printf("%.4f : llega el segmento %d.\n", hora_actual, num_trans);
 
             /* Actualizar la lista de recibidos */
-            receptor->buffer = (receptor->buffer) | (1 << (num_trans - receptor->shift));
+            if (num_trans >= receptor->shift && num_trans < receptor->shift + largo) {
+                receptor->buffer = (receptor->buffer) | (1 << (num_trans - receptor->shift));
+            }
 
             /* Actualizar el shift de receptor */
             actualizar_shift(receptor);
@@ -118,16 +140,27 @@ void simular_ventanas_deslizantes(int largo, int total, float transmis, float ti
                 insertar_evento(princ, LLEGADA_ACK, propag_sig, receptor->shift);
             } else {
                 if (VERBOSE) printf("El ACK para los segmentos hasta %d se pierde en camino.\n", num_trans);
+                acks_perdidos += 1;
             }
+            acks_total += 1;
         }
 
         if (evento_actual == LLEGADA_ACK) {
-            if (VERBOSE) printf("%.4f : llega un ACK para los segmentos hasta %d.\n", hora_actual, num_trans - 1);
+            if (VERBOSE) {
+                if (num_trans < total)
+                    printf("%.4f : llega un ACK que pide el siguiente segmento %d.\n", hora_actual, num_trans);
+                else
+                    printf("%.4f : llega el último ACK.\n", hora_actual);
+            }
 
             /* Actualizar el shift de emisor */
-            int dif = num_trans - emisor->shift;
-            emisor->buffer = (emisor->buffer) >> dif;
-            emisor->shift = num_trans;
+            if (num_trans >= emisor->shift) {
+                int dif = num_trans - emisor->shift;
+                emisor->buffer = (emisor->buffer) >> dif;
+                emisor->shift = num_trans;
+            } else {
+                printf("Es un ACK retrasado así que el emisor lo ignora. Emisor shift = %d\n", emisor->shift);
+            }
 
             /* Si ha parado de transmitir entonces debe empezar de nuevo */
             if (transmitiendo == 0) {
@@ -142,6 +175,7 @@ void simular_ventanas_deslizantes(int largo, int total, float transmis, float ti
     
             /* Fingir que nunca se envió el segmento en primer lugar */
             if (num_trans >= emisor->shift) {
+                num_timeouts += 1;
                 if (VERBOSE) printf("%.4f : ocurre un timeout para el segmento %d.\n", hora_actual, num_trans);
                 emisor->buffer = (emisor->buffer) & ~(1 << (num_trans - emisor->shift));
  
@@ -157,6 +191,18 @@ void simular_ventanas_deslizantes(int largo, int total, float transmis, float ti
         }
 
         princ = pasar(princ);
+    }
+
+    free_eventos(princ_abs);
+
+    if (RESUMEN) {
+        printf("\n---RESUMEN---\n");
+        printf("Duración total: %.4f\n", hora_actual);
+        printf("Tiempo ocioso del emisor: %.4f\n", emisor_ocioso);
+        printf("Segmentos transmitidos: %d\n", segmentos_total);
+        printf("Número de segmentos transmitidos que resultaron perdidos: %d\n", segmentos_perdidos);
+        printf("ACKs transmitidos: %d\n", acks_total);
+        printf("Número de ACKs transmitidos que resultaron perdidos: %d\n", acks_perdidos);
     }
 }
 

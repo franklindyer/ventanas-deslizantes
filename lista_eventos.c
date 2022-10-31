@@ -47,6 +47,13 @@ struct Evento* pasar(struct Evento* princ) {
     return princ->sig_evento;
 }
 
+void free_eventos(struct Evento* princ) {
+    struct Evento* siguiente = princ->sig_evento;
+    int tipo = princ->tipo;
+    free(princ);
+    if (tipo != 0) free_eventos(siguiente);
+}
+
 /*
 int main() {
     struct Evento* princ = evento_nulo();
