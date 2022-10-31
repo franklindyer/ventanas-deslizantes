@@ -1,0 +1,7 @@
+i=0
+while [ $i -lt 1000 ]
+do
+    python3 propags.py 0.05 3 | ./vd_resumen.o 6 100 0.2 10 >> datos.txt
+    ((i++))
+    echo $i
+done

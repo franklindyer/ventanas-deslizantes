@@ -159,7 +159,7 @@ void simular_ventanas_deslizantes(int largo, int total, float transmis, float ti
                 emisor->buffer = (emisor->buffer) >> dif;
                 emisor->shift = num_trans;
             } else {
-                printf("Es un ACK retrasado así que el emisor lo ignora. Emisor shift = %d\n", emisor->shift);
+                if (VERBOSE) printf("Es un ACK retrasado así que el emisor lo ignora.\n");
             }
 
             /* Si ha parado de transmitir entonces debe empezar de nuevo */
@@ -193,6 +193,8 @@ void simular_ventanas_deslizantes(int largo, int total, float transmis, float ti
         princ = pasar(princ);
     }
 
+    free(emisor);
+    free(receptor);
     free_eventos(princ_abs);
 
     if (RESUMEN) {
